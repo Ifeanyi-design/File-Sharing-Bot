@@ -61,24 +61,23 @@ async def get_messages(client, message_ids):
     return messages
 
 async def get_message_id(client, message):
-    # FORCE FIX: Trust the admin. Just get the ID.
-    
-    # 1. If it's a Forwarded Message
-    if message.forward_from_chat:
+    # METHOD 1: If you Forwarded a message
+    if message.forward_from_message_id:
         return message.forward_from_message_id
     
-    # 2. If it's a Link
+    # METHOD 2: If you Sent a Link
     elif message.text:
-        # Match standard Telegram links
-        pattern = "https://t.me/(?:c/)?(.*)/(\d+)"
-        matches = re.match(pattern, message.text)
-        if not matches:
+        # This simply grabs the LAST number in the text. 
+        # Example: https://t.me/any/link/here/1234 -> Returns 1234
+        try:
+            # Split by '/' and find the last part that is a number
+            parts = message.text.split('/')
+            if parts[-1].isdigit():
+                return int(parts[-1])
+        except:
             return 0
-        
-        # We don't care about the channel name anymore. Just give me the number.
-        msg_id = int(matches.group(2))
-        return msg_id
-
+            
+    # Fallback
     return 0
 
 def get_readable_time(seconds: int) -> str:
