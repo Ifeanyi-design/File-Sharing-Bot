@@ -61,41 +61,24 @@ async def get_messages(client, message_ids):
     return messages
 
 async def get_message_id(client, message):
-    # Case 1: If you Forwarded the message
+    # FORCE FIX: Trust the admin. Just get the ID.
+    
+    # 1. If it's a Forwarded Message
     if message.forward_from_chat:
-        # Check against the Real ID (-100...)
-        if message.forward_from_chat.id == client.db_channel.id:
-            return message.forward_from_message_id
-        # Check against the Username (just in case)
-        elif message.forward_from_chat.username and client.db_channel.username:
-            if message.forward_from_chat.username == client.db_channel.username:
-                return message.forward_from_message_id
-        else:
-            return 0
-
-    # Case 2: If you sent a Link (https://t.me/...)
+        return message.forward_from_message_id
+    
+    # 2. If it's a Link
     elif message.text:
+        # Match standard Telegram links
         pattern = "https://t.me/(?:c/)?(.*)/(\d+)"
         matches = re.match(pattern, message.text)
         if not matches:
             return 0
         
-        channel_identifier = matches.group(1)
+        # We don't care about the channel name anymore. Just give me the number.
         msg_id = int(matches.group(2))
-        
-        # If the link uses a number ID (e.g., t.me/c/123456/5)
-        if channel_identifier.isdigit():
-            # Try matching with -100 added
-            if f"-100{channel_identifier}" == str(client.db_channel.id):
-                return msg_id
-            
-        # If the link uses a Username (e.g., t.me/MaxData/5)
-        else:
-            # Compare the names (case insensitive)
-            if client.db_channel.username and channel_identifier.lower() == client.db_channel.username.lower():
-                return msg_id
-            
-    # Default: No match found
+        return msg_id
+
     return 0
 
 def get_readable_time(seconds: int) -> str:
