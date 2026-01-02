@@ -3,7 +3,6 @@
 import base64
 import re
 import asyncio
-import logging 
 from pyrogram import filters
 from pyrogram.enums import ChatMemberStatus
 from config import FORCE_SUB_CHANNEL, ADMINS, AUTO_DELETE_TIME, AUTO_DEL_SUCCESS_MSG
@@ -33,7 +32,7 @@ async def encode(string):
     return base64_string
 
 async def decode(base64_string):
-    base64_string = base64_string.strip("=") # links generated before this commit will be having = sign, hence striping them to handle padding errors.
+    base64_string = base64_string.strip("=")
     base64_bytes = (base64_string + "=" * (-len(base64_string) % 4)).encode("ascii")
     string_bytes = base64.urlsafe_b64decode(base64_bytes) 
     string = string_bytes.decode("ascii")
@@ -62,28 +61,42 @@ async def get_messages(client, message_ids):
     return messages
 
 async def get_message_id(client, message):
+    # Case 1: If you Forwarded the message
     if message.forward_from_chat:
+        # Check against the Real ID (-100...)
         if message.forward_from_chat.id == client.db_channel.id:
             return message.forward_from_message_id
+        # Check against the Username (just in case)
+        elif message.forward_from_chat.username and client.db_channel.username:
+            if message.forward_from_chat.username == client.db_channel.username:
+                return message.forward_from_message_id
         else:
             return 0
-    elif message.forward_sender_name:
-        return 0
+
+    # Case 2: If you sent a Link (https://t.me/...)
     elif message.text:
         pattern = "https://t.me/(?:c/)?(.*)/(\d+)"
-        matches = re.match(pattern,message.text)
+        matches = re.match(pattern, message.text)
         if not matches:
             return 0
-        channel_id = matches.group(1)
+        
+        channel_identifier = matches.group(1)
         msg_id = int(matches.group(2))
-        if channel_id.isdigit():
-            if f"-100{channel_id}" == str(client.db_channel.id):
+        
+        # If the link uses a number ID (e.g., t.me/c/123456/5)
+        if channel_identifier.isdigit():
+            # Try matching with -100 added
+            if f"-100{channel_identifier}" == str(client.db_channel.id):
                 return msg_id
+            
+        # If the link uses a Username (e.g., t.me/MaxData/5)
         else:
-            if channel_id == client.db_channel.username:
+            # Compare the names (case insensitive)
+            if client.db_channel.username and channel_identifier.lower() == client.db_channel.username.lower():
                 return msg_id
-    else:
-        return 0
+            
+    # Default: No match found
+    return 0
 
 def get_readable_time(seconds: int) -> str:
     count = 0
