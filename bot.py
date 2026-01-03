@@ -43,11 +43,20 @@ class Bot(Client):
 
         if FORCE_SUB_CHANNEL:
             try:
-                link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                if not link:
-                    await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
+                # 1. Check if it's a Username (String starting with @)
+                if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
+                    # For public channels, the link is just t.me/username
+                    # We avoid using the API export function to prevent errors
+                    self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
+                
+                # 2. If it's an ID (Integer), treat it as a Private Channel
+                else:
                     link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                self.invitelink = link
+                    if not link:
+                        await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
+                        link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
+                    self.invitelink = link
+
             except Exception as a:
                 self.LOGGER(__name__).warning(a)
                 self.LOGGER(__name__).warning("Bot can't Export Invite link from Force Sub Channel!")
