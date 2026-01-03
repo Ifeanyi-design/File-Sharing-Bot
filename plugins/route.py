@@ -12,38 +12,40 @@ async def root_route_handler(request):
 @routes.get(r"/watch/{hash}", allow_head=True)
 async def stream_handler(request):
     hash_id = request.match_info['hash']
-    client = request.app['client'] # Get the bot client we passed earlier
+    client = request.app['client'] 
     
     try:
-        # Decode the Hash to get Message ID
-        base64_string = hash_id
-        string = await decode(base64_string)
+        string = await decode(hash_id)
         argument = string.split("-")
         msg_id = int(int(argument[1]) / abs(client.db_channel.id))
     except:
         raise web.HTTPNotFound()
 
-    # Get the Message from Telegram
+    # 1. Get the Message
     try:
         message = await client.get_messages(client.db_channel.id, msg_id)
-        if not message or not message.document:
-             raise web.HTTPNotFound()
     except:
         raise web.HTTPNotFound()
 
-    # Prepare the File for Streaming
-    file_id = message.document.file_id
-    file_name = message.document.file_name
-    file_size = message.document.file_size
+    # 2. Identify if it's a Document or a Video (The Fix)
+    media = message.document or message.video
+    
+    if not message or not media:
+        raise web.HTTPNotFound()
 
-    # Set Headers so Browser knows it's a download
+    # 3. Use the 'media' object (works for both MP4 and MKV)
+    file_name = media.file_name or f"video_{msg_id}.mp4" # Fallback name
+    file_size = media.file_size
+    mime_type = media.mime_type or "video/mp4"
+
+    # Set Headers
     headers = {
-        'Content-Type': message.document.mime_type,
+        'Content-Type': mime_type,
         'Content-Disposition': f'attachment; filename="{file_name}"',
         'Content-Length': str(file_size)
     }
 
-    # Stream the file (Directly from Telegram to Browser)
+    # Stream the file
     resp = web.StreamResponse(status=200, headers=headers)
     await resp.prepare(request)
 
