@@ -12,13 +12,34 @@ from pyrogram.errors import FloodWait
 async def is_subscribed(filter, client, update):
     if not FORCE_SUB_CHANNEL:
         return True
+    
     user_id = update.from_user.id
     if user_id in ADMINS:
         return True
+
+    # --- SAFETY FIX START ---
+    # Create a local variable to hold the channel ID/Username
+    fs_channel = FORCE_SUB_CHANNEL
+
+    # If it is a string that looks like a number (e.g. "-10012345"), convert it to INT.
+    # This prevents errors if your config loaded the ID as a string.
+    if isinstance(fs_channel, str) and (fs_channel.isdigit() or fs_channel.startswith("-")):
+        try:
+            fs_channel = int(fs_channel)
+        except ValueError:
+            pass # If conversion fails, keep it as a string (Username)
+    # --- SAFETY FIX END ---
+
     try:
-        member = await client.get_chat_member(chat_id = FORCE_SUB_CHANNEL, user_id = user_id)
+        # Pyrogram accepts both int and str here, so 'fs_channel' works either way.
+        member = await client.get_chat_member(chat_id=fs_channel, user_id=user_id)
     except UserNotParticipant:
         return False
+    except Exception as e:
+        # Failsafe: If the bot isn't an admin or the channel is invalid,
+        # let the user pass so the bot doesn't look broken.
+        print(f"Force Sub Error: {e}")
+        return True
 
     if not member.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.MEMBER]:
         return False
