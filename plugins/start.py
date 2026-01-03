@@ -163,15 +163,28 @@ REPLY_ERROR = """<code>Use this command as a replay to any telegram message with
 
 @Bot.on_message(filters.command('start') & filters.private)
 async def not_joined(client: Client, message: Message):
-
-    if bool(JOIN_REQUEST_ENABLE):
-        invite = await client.create_chat_invite_link(
-            chat_id=FORCE_SUB_CHANNEL,
-            creates_join_request=True
-        )
-        ButtonUrl = invite.invite_link
+    
+    # --- SMART LOGIC FIX START ---
+    # Only use Join Requests if enabled AND it is NOT a public username.
+    # If it is a Username (@...), we force the simple link to prevent errors.
+    # 1. Check if we should generate a "Join Request" link
+    # We ONLY do this if it is enabled AND the channel is an ID (not a username)
+    if bool(JOIN_REQUEST_ENABLE) and not str(FORCE_SUB_CHANNEL).startswith("@"):
+        try:
+            # We wrap it in int() just to be 100% safe against string IDs like "-100..."
+            invite = await client.create_chat_invite_link(
+                chat_id=int(FORCE_SUB_CHANNEL), 
+                creates_join_request=True
+            )
+            ButtonUrl = invite.invite_link
+        except Exception as e:
+            # If anything fails (permissions, wrong ID), we just use the basic link
+            print(f"Join Request Error: {e}")
+            ButtonUrl = client.invitelink
     else:
+        # If it is a Username (@MaxCinema), we ALWAYS use the basic link
         ButtonUrl = client.invitelink
+    # --- SMART LOGIC FIX END ---
 
     buttons = [
         [
@@ -205,7 +218,7 @@ async def not_joined(client: Client, message: Message):
         quote = True,
         disable_web_page_preview = True
     )
-
+    
 @Bot.on_message(filters.command('users') & filters.private & filters.user(ADMINS))
 async def get_users(client: Bot, message: Message):
     msg = await client.send_message(chat_id=message.chat.id, text=WAIT_MSG)
