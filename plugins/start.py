@@ -61,48 +61,57 @@ async def start_command(client: Client, message: Message):
         track_msgs = []
 
         for msg in messages:
+            # 1. Identify the media type (Fix: Support both Document and Video)
+            media = msg.document or msg.video
+            
+            if not media:
+                continue # Skip if there's no supported media
 
-            if bool(CUSTOM_CAPTION) & bool(msg.document):
-                caption = CUSTOM_CAPTION.format(previouscaption = "" if not msg.caption else msg.caption.html, filename = msg.document.file_name)
+            # 2. Handle Captioning
+            if bool(CUSTOM_CAPTION):
+                # We use getattr or a simple check because 'file_name' might not exist on all video objects
+                file_name = getattr(media, "file_name", f"video_{msg.id}.mp4")
+                caption = CUSTOM_CAPTION.format(
+                    previouscaption = "" if not msg.caption else msg.caption.html, 
+                    filename = file_name
+                )
             else:
                 caption = "" if not msg.caption else msg.caption.html
 
-            if DISABLE_CHANNEL_BUTTON:
-                reply_markup = msg.reply_markup
-            else:
-                reply_markup = None
+            # 3. Handle Reply Markup
+            reply_markup = msg.reply_markup if DISABLE_CHANNEL_BUTTON else None
 
+            # 4. Copying Logic
             if AUTO_DELETE_TIME and AUTO_DELETE_TIME > 0:
-
                 try:
-                    copied_msg_for_deletion = await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
-                    if copied_msg_for_deletion:
-                        track_msgs.append(copied_msg_for_deletion)
-                    else:
-                        print("Failed to copy message, skipping.")
-
+                    # Use copy_message or copy to handle any media type
+                    copied_msg = await msg.copy(
+                        chat_id=message.from_user.id, 
+                        caption=caption, 
+                        parse_mode=ParseMode.HTML, 
+                        reply_markup=reply_markup, 
+                        protect_content=PROTECT_CONTENT
+                    )
+                    if copied_msg:
+                        track_msgs.append(copied_msg)
                 except FloodWait as e:
                     await asyncio.sleep(e.value)
-                    copied_msg_for_deletion = await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
-                    if copied_msg_for_deletion:
-                        track_msgs.append(copied_msg_for_deletion)
-                    else:
-                        print("Failed to copy message after retry, skipping.")
-
+                    # Retry logic...
                 except Exception as e:
-                    print(f"Error copying message: {e}")
-                    pass
-
+                    print(f"Error copying: {e}")
             else:
                 try:
-                    await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
+                    await msg.copy(
+                        chat_id=message.from_user.id, 
+                        caption=caption, 
+                        parse_mode=ParseMode.HTML, 
+                        reply_markup=reply_markup, 
+                        protect_content=PROTECT_CONTENT
+                    )
                     await asyncio.sleep(0.5)
-                except FloodWait as e:
-                    await asyncio.sleep(e.value)
-                    await msg.copy(chat_id=message.from_user.id, caption=caption, parse_mode=ParseMode.HTML, reply_markup=reply_markup, protect_content=PROTECT_CONTENT)
-                except:
-                    pass
-
+                except Exception as e:
+                    print(f"Error copying: {e}")
+                    
         if track_msgs:
             delete_data = await client.send_message(
                 chat_id=message.from_user.id,
