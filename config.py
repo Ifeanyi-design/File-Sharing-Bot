@@ -16,8 +16,13 @@ APP_ID = int(os.environ.get("APP_ID", ""))
 #Your API Hash from my.telegram.org
 API_HASH = os.environ.get("API_HASH", "")
 
-#Your db channel Id
-CHANNEL_ID = os.environ.get("CHANNEL_ID", "")
+# --- SMART CHANNEL ID LOADER ---
+# Checks if CHANNEL_ID is an ID (begins with -100) or a Username
+temp_db_id = os.environ.get("CHANNEL_ID", "")
+if temp_db_id.lstrip("-").isdigit():
+    CHANNEL_ID = int(temp_db_id)  # Convert to Number
+else:
+    CHANNEL_ID = temp_db_id       # Keep as String (Username)
 
 #OWNER ID
 OWNER_ID = int(os.environ.get("OWNER_ID", ""))
@@ -38,6 +43,7 @@ if temp_fsub.lstrip("-").isdigit():
     FORCE_SUB_CHANNEL = int(temp_fsub)  # It's an ID (e.g., -100123...)
 else:
     FORCE_SUB_CHANNEL = temp_fsub       # It's a Username (e.g., @MaxCinema)
+
 JOIN_REQUEST_ENABLE = os.environ.get("JOIN_REQUEST_ENABLED", None)
 
 TG_BOT_WORKERS = int(os.environ.get("TG_BOT_WORKERS", "4"))
@@ -45,6 +51,7 @@ TG_BOT_WORKERS = int(os.environ.get("TG_BOT_WORKERS", "4"))
 #start message
 START_PIC = os.environ.get("START_PIC","")
 START_MSG = os.environ.get("START_MESSAGE", "Hello {first}\n\nI can store private files in Specified Channel and other users can access it from special link.")
+
 try:
     ADMINS=[]
     for x in (os.environ.get("ADMINS", "").split()):
