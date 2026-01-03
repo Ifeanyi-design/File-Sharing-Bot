@@ -16,13 +16,13 @@ APP_ID = int(os.environ.get("APP_ID", ""))
 #Your API Hash from my.telegram.org
 API_HASH = os.environ.get("API_HASH", "")
 
-# --- SMART CHANNEL ID LOADER ---
-# Checks if CHANNEL_ID is an ID (begins with -100) or a Username
+# --- SMART CHANNEL ID LOADER (THE FIX) ---
+# This allows you to use EITHER a Username OR an ID
 temp_db_id = os.environ.get("CHANNEL_ID", "")
 if temp_db_id.lstrip("-").isdigit():
-    CHANNEL_ID = int(temp_db_id)  # Convert to Number
+    CHANNEL_ID = int(temp_db_id)  # It is an ID (e.g. -100123)
 else:
-    CHANNEL_ID = temp_db_id       # Keep as String (Username)
+    CHANNEL_ID = temp_db_id       # It is a Username (e.g. @MaxCinema)
 
 #OWNER ID
 OWNER_ID = int(os.environ.get("OWNER_ID", ""))
@@ -34,15 +34,12 @@ PORT = os.environ.get("PORT", "8080")
 DB_URI = os.environ.get("DATABASE_URL", "")
 DB_NAME = os.environ.get("DATABASE_NAME", "filesharexbot")
 
-#force sub channel id, if you want enable force sub
-# Get the raw value from the environment
+# --- SMART FORCE SUB LOADER ---
 temp_fsub = os.environ.get("FORCE_SUB_CHANNEL", "")
-
-# Check if it looks like a number (ID) or text (Username)
 if temp_fsub.lstrip("-").isdigit():
-    FORCE_SUB_CHANNEL = int(temp_fsub)  # It's an ID (e.g., -100123...)
+    FORCE_SUB_CHANNEL = int(temp_fsub)
 else:
-    FORCE_SUB_CHANNEL = temp_fsub       # It's a Username (e.g., @MaxCinema)
+    FORCE_SUB_CHANNEL = temp_fsub
 
 JOIN_REQUEST_ENABLE = os.environ.get("JOIN_REQUEST_ENABLED", None)
 
