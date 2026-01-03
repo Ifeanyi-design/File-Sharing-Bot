@@ -11,7 +11,6 @@ from datetime import datetime
 
 from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNEL, CHANNEL_ID, PORT
 
-
 ascii_art = """
 ░█████╗░░█████╗░██████╗░███████╗██╗░░██╗██████╗░░█████╗░████████╗███████╗
 ██╔══██╗██╔══██╗██╔══██╗██╔════╝╚██╗██╔╝██╔══██╗██╔══██╗╚══██╔══╝╚════██║
@@ -41,12 +40,11 @@ class Bot(Client):
         usr_bot_me = await self.get_me()
         self.uptime = datetime.now()
 
+        # --- FORCE SUB LOGIC ---
         if FORCE_SUB_CHANNEL:
             try:
                 # 1. Check if it's a Username (String starting with @)
                 if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
-                    # For public channels, the link is just t.me/username
-                    # We avoid using the API export function to prevent errors
                     self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
                 
                 # 2. If it's an ID (Integer), treat it as a Private Channel
@@ -60,24 +58,24 @@ class Bot(Client):
             except Exception as a:
                 self.LOGGER(__name__).warning(a)
                 self.LOGGER(__name__).warning("Bot can't Export Invite link from Force Sub Channel!")
-                self.LOGGER(__name__).warning(f"Please Double check the FORCE_SUB_CHANNEL value and Make sure Bot is Admin in channel with Invite Users via Link Permission, Current Force Sub Channel Value: {FORCE_SUB_CHANNEL}")
+                self.LOGGER(__name__).warning(f"Please Double check the FORCE_SUB_CHANNEL value and Make sure Bot is Admin in channel with Invite Users via Link Permission.")
                 self.LOGGER(__name__).info("\nBot Stopped. Join https://t.me/CodeXBotzSupport for support")
                 sys.exit()
+
+        # --- DB CHANNEL CONNECTION LOGIC ---
         try:
-            # Check if CHANNEL_ID is an integer string, convert it. If not, keep as username.
-            try:
-                chat_id = int(CHANNEL_ID)
-            except ValueError:
-                chat_id = CHANNEL_ID
+            # We already fixed CHANNEL_ID in config.py, so it should be correct type (int or str)
+            self.db_channel = await self.get_chat(CHANNEL_ID)
             
-            db_channel = await self.get_chat(chat_id)
-            self.db_channel = db_channel
-            test = await self.send_message(chat_id = db_channel.id, text = "Test Message")
+            # TEST MESSAGE to verify Admin Permissions
+            test = await self.send_message(chat_id = self.db_channel.id, text = "Test Message")
             await test.delete()
+            
         except Exception as e:
             self.LOGGER(__name__).warning(e)
-            self.LOGGER(__name__).warning(f"Make Sure bot is Admin in DB Channel, and Double check the CHANNEL_ID Value, Current Value {CHANNEL_ID}")
-            self.LOGGER(__name__).info("\nBot Stopped. Join https://t.me/CodeXBotzSupport for support")
+            self.LOGGER(__name__).warning(f"DB Channel Error: Make Sure bot is ADMIN in DB Channel with 'Post Messages' permission.")
+            self.LOGGER(__name__).warning(f"Current CHANNEL_ID Value: {CHANNEL_ID}")
+            self.LOGGER(__name__).info("\nBot Stopped.")
             sys.exit()
 
         self.set_parse_mode(ParseMode.HTML)
@@ -85,11 +83,10 @@ class Bot(Client):
         print(ascii_art)
         print("""Welcome to CodeXBotz File Sharing Bot""")
         self.username = usr_bot_me.username
+        
         #web-response
-        # We now pass 'self' (the bot) into the server
         app = web.AppRunner(await web_server(self)) 
         await app.setup()
-
         bind_address = "0.0.0.0"
         await web.TCPSite(app, bind_address, PORT).start()
 
