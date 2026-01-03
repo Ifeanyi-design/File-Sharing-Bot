@@ -1,3 +1,5 @@
+import pyromod.listen # 👈 THIS MUST BE THE FIRST LINE
 from bot import Bot
 
-Bot().run()
+if __name__ == "__main__":
+    Bot().run()
