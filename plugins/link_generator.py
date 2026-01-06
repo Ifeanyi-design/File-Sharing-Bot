@@ -91,84 +91,94 @@ async def link_generator(client: Client, message: Message):
 
 @Bot.on_message(filters.private & filters.user(ADMINS) & filters.command('range'))
 async def range_generator(client: Client, message: Message):
-    # 1. Ask for START Message
+    # --- 1. Ask for Start/End Messages (Standard) ---
     while True:
         try:
             start_msg = await client.ask(
-                text="Forward the **FIRST Episode** from DB Channel (with Quotes)..\nor Send the Post Link",
+                text="Forward the **FIRST Episode**...",
                 chat_id=message.from_user.id,
                 filters=(filters.forwarded | (filters.text & ~filters.forwarded)),
                 timeout=60
             )
-        except:
-            return
-        
+        except: return
         start_id = await get_message_id(client, start_msg)
-        if start_id:
-            break
-        else:
-            await start_msg.reply("❌ Error\n\nCould not find this post ID.", quote=True)
-            continue
+        if start_id: break
 
-    # 2. Ask for END Message
     while True:
         try:
             end_msg = await client.ask(
-                text="Forward the **LAST Episode** from DB Channel (with Quotes)..\nor Send the Post Link",
+                text="Forward the **LAST Episode**...",
                 chat_id=message.from_user.id,
                 filters=(filters.forwarded | (filters.text & ~filters.forwarded)),
                 timeout=60
             )
-        except:
-            return
-        
+        except: return
         end_id = await get_message_id(client, end_msg)
-        if end_id:
-            break
-        else:
-            await end_msg.reply("❌ Error\n\nCould not find this post ID.", quote=True)
-            continue
+        if end_id: break
 
-    # 3. Validation
     if start_id > end_id:
-        await message.reply("❌ Error: Start ID cannot be bigger than End ID!", quote=True)
+        start_id, end_id = end_id, start_id
+
+    processing_msg = await message.reply("⚡ Fetching list...", quote=True)
+    
+    # --- 2. Fetch Messages ---
+    try:
+        messages = await client.get_messages(client.db_channel.id, range(start_id, end_id + 1))
+    except Exception as e:
+        await processing_msg.edit(f"Error: {e}")
         return
 
-    # 4. Generate the List
-    processing_msg = await message.reply("⚡ Generating links...", quote=True)
+    clean_links = []
+    check_list = []
     
-    links_list = []
-    total_count = 0
-
-    # Calculate the channel ID part of the hash once
-    # Note: Your bot uses this math: msg_id * abs(channel_id)
-    # We must match that exactly.
     channel_int = abs(client.db_channel.id)
 
-    for msg_id in range(start_id, end_id + 1):
-        # Generate the unique hash for this message
-        string = f"get-{msg_id * channel_int}"
+    # --- 3. Build the Lists ---
+    for i, msg in enumerate(messages):
+        if not msg or msg.empty: continue
+
+        # Create Link
+        string = f"get-{msg.id * channel_int}"
         base64_string = await encode(string)
+        link = f"{URL}/watch/{base64_string}"
         
-        # Create Direct Link
-        # Note: 'URL' variable must be defined at the top of your file (your Koyeb URL)
-        direct_link = f"{URL}/watch/{base64_string}"
-        
-        links_list.append(direct_link)
-        total_count += 1
+        # Get Name (For your eyes only)
+        media = msg.document or msg.video
+        if media and media.file_name:
+            fname = media.file_name
+        elif msg.caption:
+            fname = msg.caption[:40] # First 40 chars of caption
+        else:
+            fname = "No Name Found"
 
-    # 5. Save to File
-    file_name = f"links_{start_id}_to_{end_id}.txt"
-    with open(file_name, "w") as f:
-        f.write("\n".join(links_list))
+        clean_links.append(link)
+        check_list.append(f"Link {i+1}: {fname}")
 
-    # 6. Send File
+    # --- 4. Create the 'Cheat Sheet' File ---
+    file_content = ""
+    
+    # PART A: The Links (Clean)
+    file_content += "\n".join(clean_links)
+    
+    # PART B: The Separator
+    file_content += "\n\n" + "="*30 + "\n"
+    file_content += "🛑 STOP COPYING HERE 🛑\n"
+    file_content += "Check the order below before pasting!\n"
+    file_content += "="*30 + "\n\n"
+    
+    # PART C: The Names (For Checking)
+    file_content += "\n".join(check_list)
+
+    # Save and Send
+    file_name = f"verify_links_{start_id}.txt"
+    with open(file_name, "w", encoding="utf-8") as f:
+        f.write(file_content)
+
     await message.reply_document(
         document=file_name,
-        caption=f"✅ **Generated {total_count} Links!**\n\nRange: `{start_id}` to `{end_id}`\n\n📂 Open this file and paste the links into your Website Admin Panel.",
+        caption="✅ **List Generated!**\n\nOpen the file. Copy the **TOP** part. Check the **BOTTOM** part to verify order.",
         quote=True
     )
     
-    # Cleanup
     await processing_msg.delete()
     os.remove(file_name)
