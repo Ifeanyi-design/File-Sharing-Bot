@@ -6,6 +6,7 @@ from config import ADMINS
 from helper_func import encode, get_message_id
 import os
 import asyncio
+from bot import Bot
 
 # ---------------------------------------------------------
 # 👇 THIS IS THE NEW PART
