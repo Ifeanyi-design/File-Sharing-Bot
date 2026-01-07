@@ -7,14 +7,14 @@ from helper_func import encode, get_message_id
 import os
 import asyncio
 from bot import Bot
-
+from pyrogram import Client, filters
 # ---------------------------------------------------------
 # 👇 THIS IS THE NEW PART
 # PASTE YOUR KOYEB LINK HERE (No trailing slash)
 URL = "https://concrete-gypsy-maxcinema-e2407faf.koyeb.app"
 # ---------------------------------------------------------
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.command('batch'))
+@Client.on_message(filters.private & filters.user(ADMINS) & filters.command('batch'))
 async def batch(client: Client, message: Message):
     while True:
         try:
@@ -58,7 +58,7 @@ async def batch(client: Client, message: Message):
     await second_message.reply_text(text_message, quote=True, reply_markup=reply_markup)
 
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.command('genlink'))
+@Client.on_message(filters.private & filters.user(ADMINS) & filters.command('genlink'))
 async def link_generator(client: Client, message: Message):
     while True:
         try:
@@ -88,8 +88,7 @@ async def link_generator(client: Client, message: Message):
     await channel_message.reply_text(text_message, quote=True, reply_markup=reply_markup)
 
 
-
-@Bot.on_message(filters.private & filters.user(ADMINS) & filters.command('range'))
+@Client.on_message(filters.private & filters.user(ADMINS) & filters.command('range'))
 async def range_generator(client: Client, message: Message):
     # --- 1. Ask for Start/End Messages (Standard) ---
     while True:
