@@ -99,4 +99,8 @@ logging.getLogger("pyrogram").setLevel(logging.WARNING)
 def LOGGER(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
-WORKER_TOKENS = [os.environ.get("WORKER_TOKENS", "")]
+WORKER_TOKENS = [
+"8369041780:AAGZqSxlwoZt58Bms994DFThg-eaqTMF6Rs",
+"8589960440:AAG5MLI3L8AVApY4yfxP6906soO4sIgwvXk",
+"7799238041:AAECJe_Qd_a-DFD4d8K8N1rsj9hK_Qk8v7c"
+]
