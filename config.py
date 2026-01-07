@@ -99,4 +99,4 @@ logging.getLogger("pyrogram").setLevel(logging.WARNING)
 def LOGGER(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
-WORKER_TOKENS = [os.environ.get("DISABLE_CHANNEL_BUTTON", None)]
+WORKER_TOKENS = [os.environ.get("WORKER_TOKENS", None)]
