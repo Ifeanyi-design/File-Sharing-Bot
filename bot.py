@@ -20,15 +20,14 @@ ascii_art = """
 ░╚════╝░░╚════╝░╚═════╝░╚══════╝╚═╝░░╚═╝╚═════╝░░╚════╝░░░░╚═╝░░░╚══════╝
 """
 
+# --- 1. THE MAIN BOT (Runs the Website) ---
 class Bot(Client):
     def __init__(self):
         super().__init__(
             name="Bot",
             api_hash=API_HASH,
             api_id=APP_ID,
-            plugins={
-                "root": "plugins"
-            },
+            plugins={"root": "plugins"},
             workers=TG_BOT_WORKERS,
             bot_token=TG_BOT_TOKEN,
             ipv6=False
@@ -39,57 +38,86 @@ class Bot(Client):
         await super().start()
         usr_bot_me = await self.get_me()
         self.uptime = datetime.now()
-
-        # --- FORCE SUB LOGIC ---
-        if FORCE_SUB_CHANNEL:
-            try:
-                # 1. Check if it's a Username (String starting with @)
-                if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
-                    self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
-                
-                # 2. If it's an ID (Integer), treat it as a Private Channel
-                else:
-                    link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                    if not link:
-                        await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
-                        link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                    self.invitelink = link
-
-            except Exception as a:
-                self.LOGGER(__name__).warning(a)
-                self.LOGGER(__name__).warning("Bot can't Export Invite link from Force Sub Channel!")
-                self.LOGGER(__name__).warning(f"Please Double check the FORCE_SUB_CHANNEL value and Make sure Bot is Admin in channel with Invite Users via Link Permission.")
-                self.LOGGER(__name__).info("\nBot Stopped. Join https://t.me/CodeXBotzSupport for support")
-                sys.exit()
-
-        # --- DB CHANNEL CONNECTION LOGIC ---
-        try:
-            # We already fixed CHANNEL_ID in config.py, so it should be correct type (int or str)
-            self.db_channel = await self.get_chat(CHANNEL_ID)
-            
-            # TEST MESSAGE to verify Admin Permissions
-            test = await self.send_message(chat_id = self.db_channel.id, text = "Test Message")
-            await test.delete()
-            
-        except Exception as e:
-            self.LOGGER(__name__).warning(e)
-            self.LOGGER(__name__).warning(f"DB Channel Error: Make Sure bot is ADMIN in DB Channel with 'Post Messages' permission.")
-            self.LOGGER(__name__).warning(f"Current CHANNEL_ID Value: {CHANNEL_ID}")
-            self.LOGGER(__name__).info("\nBot Stopped.")
-            sys.exit()
+        await self.setup_permissions() # Shared logic
 
         self.set_parse_mode(ParseMode.HTML)
-        self.LOGGER(__name__).info(f"Bot Running..!\n\nCreated by \nhttps://t.me/CodeXBotz")
-        print(ascii_art)
-        print("""Welcome to CodeXBotz File Sharing Bot""")
+        self.LOGGER(__name__).info(f"Main Bot Running: @{self.username}")
         self.username = usr_bot_me.username
         
-        #web-response
+        # START WEB SERVER (Only Main Bot does this)
         app = web.AppRunner(await web_server(self)) 
         await app.setup()
-        bind_address = "0.0.0.0"
-        await web.TCPSite(app, bind_address, PORT).start()
+        await web.TCPSite(app, "0.0.0.0", PORT).start()
 
     async def stop(self, *args):
         await super().stop()
         self.LOGGER(__name__).info("Bot stopped.")
+    
+    # Helper to setup DB/ForceSub for both classes
+    async def setup_permissions(self):
+        # Force Sub
+        if FORCE_SUB_CHANNEL:
+            try:
+                if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
+                    self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
+                else:
+                    try:
+                        link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
+                        if not link:
+                            await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
+                            link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
+                        self.invitelink = link
+                    except:
+                        self.LOGGER(__name__).warning("Force Sub Error")
+            except Exception as e:
+                pass
+
+        # DB Channel
+        try:
+            self.db_channel = await self.get_chat(CHANNEL_ID)
+            # Test message to confirm Admin access
+            msg = await self.send_message(chat_id=self.db_channel.id, text=".")
+            await msg.delete()
+        except Exception as e:
+            self.LOGGER(__name__).warning(f"DB Channel Error: {e}")
+
+# --- 2. THE WORKER BOT (Runs Background Tasks) ---
+class Worker(Client):
+    def __init__(self, token, name):
+        super().__init__(
+            name=name,
+            api_hash=API_HASH,
+            api_id=APP_ID,
+            plugins={"root": "plugins"},
+            workers=TG_BOT_WORKERS,
+            bot_token=token,
+            ipv6=False
+        )
+        self.LOGGER = LOGGER
+
+    async def start(self):
+        await super().start()
+        usr_bot_me = await self.get_me()
+        print(f"Worker Started: @{usr_bot_me.username}")
+        self.username = usr_bot_me.username
+        self.set_parse_mode(ParseMode.HTML)
+        
+        # Manual Permission Setup (Copy of logic above)
+        if FORCE_SUB_CHANNEL:
+            try:
+                if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
+                    self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
+                else:
+                    try:
+                        self.invitelink = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
+                    except:
+                        pass # Worker might not be admin in FSub, ignore
+            except: pass
+
+        try:
+            self.db_channel = await self.get_chat(CHANNEL_ID)
+        except:
+            print(f"Worker {self.username} failed to connect to DB Channel")
+
+    async def stop(self, *args):
+        await super().stop()
