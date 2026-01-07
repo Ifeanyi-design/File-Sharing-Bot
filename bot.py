@@ -24,7 +24,7 @@ ascii_art = """
 class Bot(Client):
     def __init__(self):
         super().__init__(
-            name="Bot",
+            name="Main_Bot",
             api_hash=API_HASH,
             api_id=APP_ID,
             plugins={"root": "plugins"},
@@ -33,55 +33,51 @@ class Bot(Client):
             ipv6=False
         )
         self.LOGGER = LOGGER
+        self.username = "Unknown_Bot" # Default to prevent crash
 
     async def start(self):
-        await super().start()
-        usr_bot_me = await self.get_me()
-        self.uptime = datetime.now()
-        await self.setup_permissions() # Shared logic
-
-        self.set_parse_mode(ParseMode.HTML)
-        self.LOGGER(__name__).info(f"Main Bot Running: @{self.username}")
-        self.username = usr_bot_me.username
+        # Initialize Web Server runner early so we can access it if needed
+        self.web_runner = web.AppRunner(await web_server(self))
+        await self.web_runner.setup()
         
-        # START WEB SERVER (Only Main Bot does this)
-        app = web.AppRunner(await web_server(self)) 
-        await app.setup()
-        await web.TCPSite(app, "0.0.0.0", PORT).start()
+        # Start Pyrogram
+        await super().start()
+        
+        # Safe Get Me
+        try:
+            usr_bot_me = await self.get_me()
+            self.username = usr_bot_me.username
+            self.LOGGER(__name__).info(f"Main Bot Running: @{self.username}")
+        except Exception as e:
+            self.LOGGER(__name__).warning(f"Failed to fetch bot username: {e}")
+
+        self.uptime = datetime.now()
+        await self.setup_permissions()
+        self.set_parse_mode(ParseMode.HTML)
+        
+        # START WEB SERVER
+        # We start this AFTER successful login
+        bind_address = "0.0.0.0"
+        await web.TCPSite(self.web_runner, bind_address, PORT).start()
+        print(f"🌍 Web Server Active on Port {PORT}")
 
     async def stop(self, *args):
         await super().stop()
-        self.LOGGER(__name__).info("Bot stopped.")
     
-    # Helper to setup DB/ForceSub for both classes
     async def setup_permissions(self):
-        # Force Sub
         if FORCE_SUB_CHANNEL:
             try:
                 if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
                     self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
                 else:
-                    try:
-                        link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                        if not link:
-                            await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
-                            link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                        self.invitelink = link
-                    except:
-                        self.LOGGER(__name__).warning("Force Sub Error")
-            except Exception as e:
-                pass
+                    self.invitelink = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
+            except: pass
 
-        # DB Channel
         try:
             self.db_channel = await self.get_chat(CHANNEL_ID)
-            # Test message to confirm Admin access
-            msg = await self.send_message(chat_id=self.db_channel.id, text=".")
-            await msg.delete()
-        except Exception as e:
-            self.LOGGER(__name__).warning(f"DB Channel Error: {e}")
+        except: pass
 
-# --- 2. THE WORKER BOT (Runs Background Tasks) ---
+# --- 2. THE WORKER BOT ---
 class Worker(Client):
     def __init__(self, token, name):
         super().__init__(
@@ -94,30 +90,22 @@ class Worker(Client):
             ipv6=False
         )
         self.LOGGER = LOGGER
+        self.username = "Unknown_Worker"
 
     async def start(self):
         await super().start()
-        usr_bot_me = await self.get_me()
-        print(f"Worker Started: @{usr_bot_me.username}")
-        self.username = usr_bot_me.username
+        try:
+            usr_bot_me = await self.get_me()
+            self.username = usr_bot_me.username
+            print(f"Worker Started: @{self.username}")
+        except: pass
+        
         self.set_parse_mode(ParseMode.HTML)
         
-        # Manual Permission Setup (Copy of logic above)
-        if FORCE_SUB_CHANNEL:
-            try:
-                if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
-                    self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
-                else:
-                    try:
-                        self.invitelink = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                    except:
-                        pass # Worker might not be admin in FSub, ignore
-            except: pass
-
+        # Manual DB Setup
         try:
             self.db_channel = await self.get_chat(CHANNEL_ID)
-        except:
-            print(f"Worker {self.username} failed to connect to DB Channel")
+        except: pass
 
     async def stop(self, *args):
         await super().stop()
