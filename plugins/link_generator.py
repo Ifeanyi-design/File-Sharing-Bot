@@ -90,7 +90,7 @@ async def link_generator(client: Client, message: Message):
 
 @Client.on_message(filters.private & filters.user(ADMINS) & filters.command('range'))
 async def range_generator(client: Client, message: Message):
-    # --- 1. Ask for Start/End Messages (Standard) ---
+    # --- 1. Ask for Start Message ---
     while True:
         try:
             start_msg = await client.ask(
@@ -99,10 +99,21 @@ async def range_generator(client: Client, message: Message):
                 filters=(filters.forwarded | (filters.text & ~filters.forwarded)),
                 timeout=60
             )
-        except: return
-        start_id = await get_message_id(client, start_msg)
-        if start_id: break
+        except Exception as e:
+            # If it times out or fails, tell the user!
+            await message.reply(f"❌ Error waiting for input: {e}")
+            return
 
+        start_id = await get_message_id(client, start_msg)
+        
+        if start_id:
+            break
+        else:
+            # 👇 THIS WAS MISSING IN YOUR OLD CODE
+            await start_msg.reply("❌ Error\n\nCould not find this post in the DB Channel. Try again.", quote=True)
+            continue
+
+    # --- 2. Ask for End Message ---
     while True:
         try:
             end_msg = await client.ask(
@@ -111,20 +122,29 @@ async def range_generator(client: Client, message: Message):
                 filters=(filters.forwarded | (filters.text & ~filters.forwarded)),
                 timeout=60
             )
-        except: return
+        except Exception as e:
+            await message.reply(f"❌ Error waiting for input: {e}")
+            return
+
         end_id = await get_message_id(client, end_msg)
-        if end_id: break
+        
+        if end_id:
+            break
+        else:
+            await end_msg.reply("❌ Error\n\nCould not find this post in the DB Channel. Try again.", quote=True)
+            continue
 
     if start_id > end_id:
         start_id, end_id = end_id, start_id
 
     processing_msg = await message.reply("⚡ Fetching list...", quote=True)
     
-    # --- 2. Fetch Messages ---
+    # --- 3. Fetch Messages ---
     try:
+        # Fetching messages from DB Channel
         messages = await client.get_messages(client.db_channel.id, range(start_id, end_id + 1))
     except Exception as e:
-        await processing_msg.edit(f"Error: {e}")
+        await processing_msg.edit(f"❌ Error fetching from DB: {e}")
         return
 
     clean_links = []
@@ -132,7 +152,11 @@ async def range_generator(client: Client, message: Message):
     
     channel_int = abs(client.db_channel.id)
 
-    # --- 3. Build the Lists ---
+    # --- 4. Build the Lists ---
+    if not messages:
+        await processing_msg.edit("❌ No messages found in that range.")
+        return
+
     for i, msg in enumerate(messages):
         if not msg or msg.empty: continue
 
@@ -153,7 +177,7 @@ async def range_generator(client: Client, message: Message):
         clean_links.append(link)
         check_list.append(f"Link {i+1}: {fname}")
 
-    # --- 4. Create the 'Cheat Sheet' File ---
+    # --- 5. Create the 'Cheat Sheet' File ---
     file_content = ""
     
     # PART A: The Links (Clean)
@@ -170,14 +194,18 @@ async def range_generator(client: Client, message: Message):
 
     # Save and Send
     file_name = f"verify_links_{start_id}.txt"
-    with open(file_name, "w", encoding="utf-8") as f:
-        f.write(file_content)
+    try:
+        with open(file_name, "w", encoding="utf-8") as f:
+            f.write(file_content)
 
-    await message.reply_document(
-        document=file_name,
-        caption="✅ **List Generated!**\n\nOpen the file. Copy the **TOP** part. Check the **BOTTOM** part to verify order.",
-        quote=True
-    )
+        await message.reply_document(
+            document=file_name,
+            caption="✅ **List Generated!**\n\nOpen the file. Copy the **TOP** part. Check the **BOTTOM** part to verify order.",
+            quote=True
+        )
+    except Exception as e:
+        await message.reply(f"❌ Error sending file: {e}")
     
     await processing_msg.delete()
-    os.remove(file_name)
+    if os.path.exists(file_name):
+        os.remove(file_name)
