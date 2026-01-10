@@ -90,54 +90,37 @@ async def link_generator(client: Client, message: Message):
 
 @Client.on_message(filters.private & filters.user(ADMINS) & filters.command('range'))
 async def range_generator(client: Client, message: Message):
-    # --- 1. Ask for Start Message (NO TIMEOUT) ---
-    while True:
-        try:
-            start_msg = await client.ask(
-                text="Forward the **FIRST Episode**...",
-                chat_id=message.from_user.id,
-                filters=(filters.forwarded | (filters.text & ~filters.forwarded))
-                # Removed timeout=60 to fix the crash
-            )
-        except Exception as e:
-            await message.reply(f"❌ Error waiting for input: {e}")
-            return
+    # 1. Check if user sent the links
+    if len(message.command) < 3:
+        await message.reply(
+            "❌ **Usage Error**\n\n"
+            "Don't just click the command. Type it like this:\n"
+            "`/range [Start_Link] [End_Link]`\n\n"
+            "**Example:**\n"
+            "`/range https://t.me/c/1234/10 https://t.me/c/1234/20`"
+        )
+        return
 
-        start_id = await get_message_id(client, start_msg)
-        
-        if start_id:
-            break
-        else:
-            await start_msg.reply("❌ Error\n\nCould not find this post in the DB Channel. Try again.", quote=True)
-            continue
+    # 2. Extract IDs from Links
+    try:
+        # Get the text after /range
+        link1 = message.command[1]
+        link2 = message.command[2]
 
-    # --- 2. Ask for End Message (NO TIMEOUT) ---
-    while True:
-        try:
-            end_msg = await client.ask(
-                text="Forward the **LAST Episode**...",
-                chat_id=message.from_user.id,
-                filters=(filters.forwarded | (filters.text & ~filters.forwarded))
-                # Removed timeout=60 to fix the crash
-            )
-        except Exception as e:
-            await message.reply(f"❌ Error waiting for input: {e}")
-            return
+        # Extract the number at the end of the link
+        start_id = int(link1.split("/")[-1])
+        end_id = int(link2.split("/")[-1])
+    except:
+        await message.reply("❌ **Error:** Could not read those links. Make sure they are standard Telegram post links.")
+        return
 
-        end_id = await get_message_id(client, end_msg)
-        
-        if end_id:
-            break
-        else:
-            await end_msg.reply("❌ Error\n\nCould not find this post in the DB Channel. Try again.", quote=True)
-            continue
-
+    # Swap if start is bigger than end
     if start_id > end_id:
         start_id, end_id = end_id, start_id
 
-    processing_msg = await message.reply("⚡ Fetching list...", quote=True)
+    processing_msg = await message.reply(f"⚡ Fetching episodes {start_id} to {end_id}...", quote=True)
     
-    # --- 3. Fetch Messages ---
+    # 3. Fetch Messages from DB
     try:
         messages = await client.get_messages(client.db_channel.id, range(start_id, end_id + 1))
     except Exception as e:
@@ -149,7 +132,7 @@ async def range_generator(client: Client, message: Message):
     
     channel_int = abs(client.db_channel.id)
 
-    # --- 4. Build the Lists ---
+    # 4. Build the Lists
     if not messages:
         await processing_msg.edit("❌ No messages found in that range.")
         return
@@ -174,7 +157,7 @@ async def range_generator(client: Client, message: Message):
         clean_links.append(link)
         check_list.append(f"Link {i+1}: {fname}")
 
-    # --- 5. Create the File ---
+    # 5. Create the File
     file_content = ""
     file_content += "\n".join(clean_links)
     file_content += "\n\n" + "="*30 + "\n"
