@@ -90,17 +90,16 @@ async def link_generator(client: Client, message: Message):
 
 @Client.on_message(filters.private & filters.user(ADMINS) & filters.command('range'))
 async def range_generator(client: Client, message: Message):
-    # --- 1. Ask for Start Message ---
+    # --- 1. Ask for Start Message (NO TIMEOUT) ---
     while True:
         try:
             start_msg = await client.ask(
                 text="Forward the **FIRST Episode**...",
                 chat_id=message.from_user.id,
-                filters=(filters.forwarded | (filters.text & ~filters.forwarded)),
-                timeout=60
+                filters=(filters.forwarded | (filters.text & ~filters.forwarded))
+                # Removed timeout=60 to fix the crash
             )
         except Exception as e:
-            # If it times out or fails, tell the user!
             await message.reply(f"❌ Error waiting for input: {e}")
             return
 
@@ -109,18 +108,17 @@ async def range_generator(client: Client, message: Message):
         if start_id:
             break
         else:
-            # 👇 THIS WAS MISSING IN YOUR OLD CODE
             await start_msg.reply("❌ Error\n\nCould not find this post in the DB Channel. Try again.", quote=True)
             continue
 
-    # --- 2. Ask for End Message ---
+    # --- 2. Ask for End Message (NO TIMEOUT) ---
     while True:
         try:
             end_msg = await client.ask(
                 text="Forward the **LAST Episode**...",
                 chat_id=message.from_user.id,
-                filters=(filters.forwarded | (filters.text & ~filters.forwarded)),
-                timeout=60
+                filters=(filters.forwarded | (filters.text & ~filters.forwarded))
+                # Removed timeout=60 to fix the crash
             )
         except Exception as e:
             await message.reply(f"❌ Error waiting for input: {e}")
@@ -141,7 +139,6 @@ async def range_generator(client: Client, message: Message):
     
     # --- 3. Fetch Messages ---
     try:
-        # Fetching messages from DB Channel
         messages = await client.get_messages(client.db_channel.id, range(start_id, end_id + 1))
     except Exception as e:
         await processing_msg.edit(f"❌ Error fetching from DB: {e}")
@@ -165,34 +162,27 @@ async def range_generator(client: Client, message: Message):
         base64_string = await encode(string)
         link = f"{URL}/watch/{base64_string}"
         
-        # Get Name (For your eyes only)
+        # Get Name
         media = msg.document or msg.video
         if media and media.file_name:
             fname = media.file_name
         elif msg.caption:
-            fname = msg.caption[:40] # First 40 chars of caption
+            fname = msg.caption[:40] 
         else:
             fname = "No Name Found"
 
         clean_links.append(link)
         check_list.append(f"Link {i+1}: {fname}")
 
-    # --- 5. Create the 'Cheat Sheet' File ---
+    # --- 5. Create the File ---
     file_content = ""
-    
-    # PART A: The Links (Clean)
     file_content += "\n".join(clean_links)
-    
-    # PART B: The Separator
     file_content += "\n\n" + "="*30 + "\n"
     file_content += "🛑 STOP COPYING HERE 🛑\n"
     file_content += "Check the order below before pasting!\n"
     file_content += "="*30 + "\n\n"
-    
-    # PART C: The Names (For Checking)
     file_content += "\n".join(check_list)
 
-    # Save and Send
     file_name = f"verify_links_{start_id}.txt"
     try:
         with open(file_name, "w", encoding="utf-8") as f:
