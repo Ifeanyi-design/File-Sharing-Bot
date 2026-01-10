@@ -14,9 +14,7 @@ async def stream_handler(request):
     hash_id = request.match_info['hash']
     client = request.app['client'] 
     
-    # 👇 1. CATCH THE CUSTOM NAME FROM URL (e.g. ?name=The-Flash-S01E01)
-    custom_name = request.query.get('name')
-
+    # 1. Decode Hash
     try:
         string = await decode(hash_id)
         argument = string.split("-")
@@ -24,55 +22,108 @@ async def stream_handler(request):
     except:
         raise web.HTTPNotFound()
 
-    # Get the Message from Telegram
+    # 2. Get Message
     try:
         message = await client.get_messages(client.db_channel.id, msg_id)
     except:
         raise web.HTTPNotFound()
 
-    # Identify if it's a Document or a Video
     media = message.document or message.video
-    
     if not message or not media:
         raise web.HTTPNotFound()
 
-    # 👇 2. SMART RENAMING LOGIC
-    # Get the original filename from Telegram to find the extension (mp4/mkv/avi)
-    # We use getattr() because sometimes 'file_name' might be missing on video objects
+    # 3. File Details
+    file_size = media.file_size
+    mime_type = media.mime_type or "video/mp4"
+    
+    # Custom Name Logic
+    custom_name = request.query.get('name')
     original_name = getattr(media, "file_name", f"video_{msg_id}.mp4") or f"video_{msg_id}.mp4"
-
+    
     if custom_name:
-        # Determine extension from the REAL file on Telegram
         if "." in original_name:
             ext = original_name.split(".")[-1]
         else:
-            ext = "mp4" # Fallback if Telegram file has no extension
-
-        # Combine Flask's clean name + Real extension
-        # If custom_name is "The-Flash-S01E01" and ext is "mkv" -> "The-Flash-S01E01.mkv"
+            ext = "mp4"
         if not custom_name.endswith(f".{ext}"):
             file_name = f"{custom_name}.{ext}"
         else:
             file_name = custom_name
     else:
-        # If no name provided in URL, use the original filename
         file_name = original_name
 
-    file_size = media.file_size
-    mime_type = media.mime_type or "video/mp4"
+    # ==============================
+    # 🛑 RESUME SUPPORT (Range Header)
+    # ==============================
+    range_header = request.headers.get("Range")
+    
+    # Defaults (Download whole file)
+    from_bytes = 0
+    until_bytes = file_size - 1
+    status_code = 200
+    
+    if range_header:
+        try:
+            # Parse "bytes=1000-" or "bytes=1000-5000"
+            parts = range_header.replace("bytes=", "").split("-")
+            from_bytes = int(parts[0])
+            if len(parts) > 1 and parts[1]:
+                until_bytes = int(parts[1])
+            
+            # Sanity Check
+            if from_bytes >= file_size:
+                # If they ask for bytes beyond the file, send 416 error
+                return web.Response(status=416, headers={'Content-Range': f'bytes */{file_size}'})
+                
+            status_code = 206 # Partial Content
+        except:
+            # If parsing fails, fallback to normal download
+            pass
 
-    # Set Headers with the NEW Name
+    # Calculate Length to send
+    content_length = until_bytes - from_bytes + 1
+    
+    # Calculate Pyrogram Chunk Offset (1 Chunk = 1MB = 1048576 bytes)
+    CHUNK_SIZE = 1048576
+    chunk_start_index = from_bytes // CHUNK_SIZE
+    offset_in_first_chunk = from_bytes % CHUNK_SIZE
+
+    # Headers
     headers = {
         'Content-Type': mime_type,
         'Content-Disposition': f'attachment; filename="{file_name}"',
-        'Content-Length': str(file_size)
+        'Accept-Ranges': 'bytes',
+        'Content-Range': f'bytes {from_bytes}-{until_bytes}/{file_size}',
+        'Content-Length': str(content_length)
     }
 
-    # Stream the file
-    resp = web.StreamResponse(status=200, headers=headers)
+    # Prepare Response
+    resp = web.StreamResponse(status=status_code, headers=headers)
     await resp.prepare(request)
 
-    async for chunk in client.stream_media(message, limit=0, offset=0):
-        await resp.write(chunk)
-    
+    # Stream Loop
+    try:
+        # We start requesting chunks from Telegram at 'chunk_start_index'
+        async for chunk in client.stream_media(message, offset=chunk_start_index):
+            
+            # If this is the VERY FIRST chunk, we might need to skip some bytes
+            if offset_in_first_chunk > 0:
+                chunk = chunk[offset_in_first_chunk:]
+                offset_in_first_chunk = 0 # Only do this once
+            
+            # Stop if we have sent enough bytes (for specific range requests)
+            if content_length > 0:
+                if len(chunk) >= content_length:
+                    await resp.write(chunk[:content_length])
+                    break
+                else:
+                    await resp.write(chunk)
+                    content_length -= len(chunk)
+            else:
+                break
+                
+    except Exception as e:
+        # If connection drops, just stop. Don't crash the server.
+        pass
+
     return resp
