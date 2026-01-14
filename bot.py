@@ -39,10 +39,10 @@ class Bot(Client):
         # Initialize Web Server runner early so we can access it if needed
         self.web_runner = web.AppRunner(await web_server(self))
         await self.web_runner.setup()
-        
+
         # Start Pyrogram
         await super().start()
-        
+
         # Safe Get Me
         try:
             usr_bot_me = await self.get_me()
@@ -54,7 +54,7 @@ class Bot(Client):
         self.uptime = datetime.now()
         await self.setup_permissions()
         self.set_parse_mode(ParseMode.HTML)
-        
+
         # START WEB SERVER
         # We start this AFTER successful login
         bind_address = "0.0.0.0"
@@ -63,7 +63,7 @@ class Bot(Client):
 
     async def stop(self, *args):
         await super().stop()
-    
+
     async def setup_permissions(self):
         if FORCE_SUB_CHANNEL:
             try:
@@ -99,13 +99,29 @@ class Worker(Client):
             self.username = usr_bot_me.username
             print(f"Worker Started: @{self.username}")
         except: pass
-        
+
         self.set_parse_mode(ParseMode.HTML)
-        
+
         # Manual DB Setup
         try:
             self.db_channel = await self.get_chat(CHANNEL_ID)
         except: pass
+
+        # 👇 FIX: INITIALIZE INVITE LINK FOR WORKERS TOO 👇
+        if FORCE_SUB_CHANNEL:
+            try:
+                if isinstance(FORCE_SUB_CHANNEL, str) and FORCE_SUB_CHANNEL.startswith("@"):
+                    self.invitelink = f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}"
+                else:
+                    # Workers might not be admins, so this could fail if they aren't.
+                    # Best practice: Add workers as admins OR hardcode the link.
+                    chat = await self.get_chat(FORCE_SUB_CHANNEL)
+                    self.invitelink = chat.invite_link
+            except Exception as e:
+                # Fallback if worker can't fetch link (not admin)
+                print(f"⚠️ Worker {self.name} couldn't fetch invite link: {e}")
+                # We assume the main config has a username or we default to a placeholder
+                self.invitelink = "https://t.me/MaxCinemaOfficial" 
 
     async def stop(self, *args):
         await super().stop()
