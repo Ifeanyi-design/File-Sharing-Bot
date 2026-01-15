@@ -1,6 +1,6 @@
-#(©)Codexbotz
-from aiohttp import web
 import math
+import re
+from aiohttp import web
 from helper_func import decode, get_messages
 
 routes = web.RouteTableDef()
@@ -13,7 +13,7 @@ async def root_route_handler(request):
 async def stream_handler(request):
     hash_id = request.match_info['hash']
     client = request.app['client'] 
-    
+
     # 1. Decode Hash
     try:
         string = await decode(hash_id)
@@ -39,7 +39,7 @@ async def stream_handler(request):
     # Custom Name Logic
     custom_name = request.query.get('name')
     original_name = getattr(media, "file_name", f"video_{msg_id}.mp4") or f"video_{msg_id}.mp4"
-    
+
     if custom_name:
         if "." in original_name:
             ext = original_name.split(".")[-1]
@@ -57,36 +57,42 @@ async def stream_handler(request):
     # ==============================
     range_header = request.headers.get("Range")
     
-    # Defaults (Download whole file)
+    # Defaults
     from_bytes = 0
     until_bytes = file_size - 1
     status_code = 200
-    
+
     if range_header:
         try:
-            # Parse "bytes=1000-" or "bytes=1000-5000"
-            parts = range_header.replace("bytes=", "").split("-")
-            from_bytes = int(parts[0])
-            if len(parts) > 1 and parts[1]:
-                until_bytes = int(parts[1])
+            # Better Regex parsing for stability
+            range_match = re.search(r'(\d+)-(\d*)', range_header)
+            if range_match:
+                from_bytes = int(range_match.group(1))
+                if range_match.group(2):
+                    until_bytes = int(range_match.group(2))
             
             # Sanity Check
             if from_bytes >= file_size:
-                # If they ask for bytes beyond the file, send 416 error
                 return web.Response(status=416, headers={'Content-Range': f'bytes */{file_size}'})
-                
+
             status_code = 206 # Partial Content
-        except:
-            # If parsing fails, fallback to normal download
+        except Exception:
             pass
 
-    # Calculate Length to send
+    # Calculate exact length to send
     content_length = until_bytes - from_bytes + 1
     
-    # Calculate Pyrogram Chunk Offset (1 Chunk = 1MB = 1048576 bytes)
-    CHUNK_SIZE = 1048576
+    # Pyrogram Chunk Size (1MB)
+    CHUNK_SIZE = 1048576 
+    
+    # Calculate Start Index & Offset
     chunk_start_index = from_bytes // CHUNK_SIZE
     offset_in_first_chunk = from_bytes % CHUNK_SIZE
+    
+    # ⚠️ OPTIMIZATION: Calculate how many chunks we actally need
+    # This prevents Pyrogram from downloading the whole file if we only need a small part
+    bytes_needed = content_length + offset_in_first_chunk
+    chunks_needed = math.ceil(bytes_needed / CHUNK_SIZE)
 
     # Headers
     headers = {
@@ -97,21 +103,19 @@ async def stream_handler(request):
         'Content-Length': str(content_length)
     }
 
-    # Prepare Response
     resp = web.StreamResponse(status=status_code, headers=headers)
     await resp.prepare(request)
 
-    # Stream Loop
     try:
-        # We start requesting chunks from Telegram at 'chunk_start_index'
-        async for chunk in client.stream_media(message, offset=chunk_start_index):
+        # We pass 'limit=chunks_needed' to stop Pyrogram from over-fetching
+        async for chunk in client.stream_media(message, offset=chunk_start_index, limit=chunks_needed):
             
-            # If this is the VERY FIRST chunk, we might need to skip some bytes
+            # Handle first chunk offset (Resume logic)
             if offset_in_first_chunk > 0:
                 chunk = chunk[offset_in_first_chunk:]
-                offset_in_first_chunk = 0 # Only do this once
-            
-            # Stop if we have sent enough bytes (for specific range requests)
+                offset_in_first_chunk = 0 
+
+            # Write only what is requested
             if content_length > 0:
                 if len(chunk) >= content_length:
                     await resp.write(chunk[:content_length])
@@ -122,8 +126,8 @@ async def stream_handler(request):
             else:
                 break
                 
-    except Exception as e:
-        # If connection drops, just stop. Don't crash the server.
+    except Exception:
+        # Connection dropped by user (normal behavior)
         pass
 
     return resp
