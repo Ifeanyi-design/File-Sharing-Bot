@@ -104,6 +104,11 @@ async def stream_handler(request):
     }
 
     resp = web.StreamResponse(status=status_code, headers=headers)
+    
+    # ⬇️ ADD THIS LINE HERE ⬇️
+    resp.enable_chunked_encoding() 
+    # ⬆️ THIS KEEPS THE CONNECTION ALIVE ⬆️
+    
     await resp.prepare(request)
 
     try:
