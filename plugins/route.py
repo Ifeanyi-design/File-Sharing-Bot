@@ -1,5 +1,7 @@
 import asyncio
 import hashlib
+import json
+import logging
 import math
 import re
 import time
@@ -19,6 +21,7 @@ from helper_func import decode
 
 routes = web.RouteTableDef()
 CHUNK_SIZE = 1048576
+STREAM_LOGGER = logging.getLogger("stream.observability")
 
 
 class TTLCacheLRU:
@@ -70,6 +73,26 @@ def _pick_clients(app, shard_key):
     return healthy_clients[start_index:] + healthy_clients[:start_index]
 
 
+def _metrics(app):
+    if app is None or not hasattr(app, "get"):
+        return None
+    return app.get("stream_metrics")
+
+
+def _inc(app, key, delta=1):
+    metrics = _metrics(app)
+    if metrics is not None:
+        metrics[key] = metrics.get(key, 0) + delta
+
+
+def _inc_nested(app, parent_key, child_key, delta=1):
+    metrics = _metrics(app)
+    if metrics is None:
+        return
+    parent = metrics.setdefault(parent_key, {})
+    parent[child_key] = parent.get(child_key, 0) + delta
+
+
 def _get_semaphore(app, client):
     semaphores = app["client_semaphores"]
     semaphore = semaphores.get(client.name)
@@ -89,8 +112,10 @@ async def _get_message(client, msg_id: int):
     cache_key = (client.name, client.db_channel.id, msg_id)
     message = META_CACHE.get(cache_key)
     if message is not None:
+        _inc_nested(getattr(client, "stream_app", None), "meta_cache", "hits")
         return message
 
+    _inc_nested(getattr(client, "stream_app", None), "meta_cache", "misses")
     message = await client.get_messages(client.db_channel.id, msg_id)
     if not message or message.empty:
         raise web.HTTPNotFound()
@@ -103,7 +128,9 @@ async def _fetch_chunk_singleflight(client, message, chunk_key, chunk_index: int
     if cache_enabled:
         cached_chunk = CHUNK_CACHE.get(chunk_key)
         if cached_chunk is not None:
+            _inc_nested(getattr(client, "stream_app", None), "chunk_cache", "hits")
             return cached_chunk
+        _inc_nested(getattr(client, "stream_app", None), "chunk_cache", "misses")
 
     if not cache_enabled:
         async for chunk in client.stream_media(message, offset=chunk_index, limit=1):
@@ -144,8 +171,54 @@ async def root_route_handler(request):
     return web.json_response("MaxCinema Server is Running!")
 
 
+@routes.get("/metrics", allow_head=True)
+async def metrics_handler(request):
+    metrics = request.app.get("stream_metrics", {})
+    worker_active = metrics.get("worker_active_streams", {})
+    worker_requests = metrics.get("worker_requests", {})
+    worker_success = metrics.get("worker_success", {})
+    worker_fallbacks = metrics.get("worker_fallbacks", {})
+    streams_completed = metrics.get("streams_completed", 0)
+
+    response = {
+        "active_streams": metrics.get("active_streams", 0),
+        "requests_total": metrics.get("requests_total", 0),
+        "workers": {
+            "active_streams": worker_active,
+            "requests": worker_requests,
+            "success": worker_success,
+            "fallbacks": worker_fallbacks,
+        },
+        "meta_cache": metrics.get("meta_cache", {"hits": 0, "misses": 0}),
+        "chunk_cache": metrics.get("chunk_cache", {"hits": 0, "misses": 0}),
+        "fallbacks": metrics.get("fallbacks", 0),
+        "floodwaits": metrics.get("floodwaits", 0),
+        "streams_completed": streams_completed,
+        "streams_failed": metrics.get("streams_failed", 0),
+        "bytes_streamed_total": metrics.get("bytes_streamed_total", 0),
+        "avg_first_byte_seconds": (
+            metrics.get("first_byte_seconds_sum", 0.0) / streams_completed if streams_completed else 0.0
+        ),
+        "avg_stream_duration_seconds": (
+            metrics.get("stream_duration_seconds_sum", 0.0) / streams_completed if streams_completed else 0.0
+        ),
+        "avg_throughput_bytes_per_sec": (
+            metrics.get("throughput_bytes_per_sec_sum", 0.0) / streams_completed if streams_completed else 0.0
+        ),
+        "avg_semaphore_wait_seconds": (
+            metrics.get("semaphore_wait_seconds_sum", 0.0) / metrics.get("semaphore_acquires", 1)
+            if metrics.get("semaphore_acquires", 0)
+            else 0.0
+        ),
+    }
+    return web.json_response(response)
+
+
 @routes.get(r"/watch/{hash}", allow_head=True)
 async def stream_handler(request):
+    request_start = time.monotonic()
+    _inc(request.app, "requests_total")
+    _inc(request.app, "active_streams")
     hash_id = request.match_info["hash"]
 
     try:
@@ -154,18 +227,32 @@ async def stream_handler(request):
         main_client = request.app["client"]
         msg_id = int(int(argument[1]) / abs(main_client.db_channel.id))
     except Exception:
+        _inc(request.app, "active_streams", -1)
         raise web.HTTPNotFound()
 
     selected_clients = _pick_clients(request.app, shard_key=msg_id)
     if not selected_clients:
+        _inc(request.app, "active_streams", -1)
         raise web.HTTPServiceUnavailable(text="No streaming clients available")
 
     last_error = None
+    first_byte_time = None
+    selected_worker_name = None
+    bytes_streamed = 0
+    stream_interrupted = False
+    selected_clients_count = len(selected_clients)
 
-    for client in selected_clients:
+    for index, client in enumerate(selected_clients):
+        client.stream_app = request.app
         semaphore = _get_semaphore(request.app, client)
+        _inc_nested(request.app, "worker_requests", client.name)
+        wait_started = time.monotonic()
 
         async with semaphore:
+            wait_time = time.monotonic() - wait_started
+            _inc(request.app, "semaphore_acquires")
+            _inc(request.app, "semaphore_wait_seconds_sum", wait_time)
+            _inc_nested(request.app, "worker_active_streams", client.name)
             try:
                 message = await _get_message(client, msg_id)
                 media = message.document or message.video
@@ -213,6 +300,8 @@ async def stream_handler(request):
                 }
 
                 if request.method == "HEAD":
+                    _inc_nested(request.app, "worker_active_streams", client.name, -1)
+                    _inc(request.app, "active_streams", -1)
                     return web.Response(status=status_code, headers=headers)
 
                 response = web.StreamResponse(status=status_code, headers=headers)
@@ -247,29 +336,90 @@ async def stream_handler(request):
                             break
 
                         if len(chunk) >= remaining:
-                            await response.write(chunk[:remaining])
+                            to_write = chunk[:remaining]
+                            if first_byte_time is None and to_write:
+                                first_byte_time = time.monotonic()
+                            await response.write(to_write)
+                            bytes_streamed += len(to_write)
                             remaining = 0
                             break
 
+                        if first_byte_time is None and chunk:
+                            first_byte_time = time.monotonic()
                         await response.write(chunk)
+                        bytes_streamed += len(chunk)
                         remaining -= len(chunk)
                 except FloodWait:
                     raise
                 except Exception:
+                    stream_interrupted = True
                     pass
 
+                selected_worker_name = client.name
+                _inc_nested(request.app, "worker_success", client.name)
+                _inc_nested(request.app, "worker_active_streams", client.name, -1)
+                _inc(request.app, "active_streams", -1)
+                duration = max(time.monotonic() - request_start, 1e-6)
+                throughput = bytes_streamed / duration
+                if first_byte_time is not None:
+                    _inc(request.app, "first_byte_seconds_sum", first_byte_time - request_start)
+                _inc(request.app, "stream_duration_seconds_sum", duration)
+                _inc(request.app, "bytes_streamed_total", bytes_streamed)
+                _inc(request.app, "throughput_bytes_per_sec_sum", throughput)
+                _inc(request.app, "streams_completed")
+                STREAM_LOGGER.info(
+                    json.dumps(
+                        {
+                            "event": "stream_complete",
+                            "hash": hash_id,
+                            "worker": selected_worker_name,
+                            "status": status_code,
+                            "bytes_streamed": bytes_streamed,
+                            "first_byte_seconds": (first_byte_time - request_start) if first_byte_time else None,
+                            "duration_seconds": duration,
+                            "throughput_bps": throughput,
+                            "semaphore_wait_seconds": wait_time,
+                            "selected_clients": selected_clients_count,
+                            "stream_interrupted": stream_interrupted,
+                            "range": bool(range_header),
+                        }
+                    )
+                )
                 return response
 
             except FloodWait as flood_wait:
                 last_error = flood_wait
+                _inc(request.app, "floodwaits")
                 _mark_cooldown(request.app, client.name, getattr(flood_wait, "value", 3))
+                _inc_nested(request.app, "worker_active_streams", client.name, -1)
+                if index < selected_clients_count - 1:
+                    _inc(request.app, "fallbacks")
+                    _inc_nested(request.app, "worker_fallbacks", client.name)
                 continue
             except web.HTTPNotFound:
+                _inc_nested(request.app, "worker_active_streams", client.name, -1)
+                _inc(request.app, "active_streams", -1)
                 raise
             except Exception as exc:
                 last_error = exc
+                _inc_nested(request.app, "worker_active_streams", client.name, -1)
+                if index < selected_clients_count - 1:
+                    _inc(request.app, "fallbacks")
+                    _inc_nested(request.app, "worker_fallbacks", client.name)
                 continue
 
+    _inc(request.app, "active_streams", -1)
+    _inc(request.app, "streams_failed")
+    STREAM_LOGGER.warning(
+        json.dumps(
+            {
+                "event": "stream_failed",
+                "hash": hash_id,
+                "error": type(last_error).__name__ if last_error else "UnknownError",
+                "selected_clients": selected_clients_count,
+            }
+        )
+    )
     if isinstance(last_error, FloodWait):
         raise web.HTTPTooManyRequests(text="All streaming workers are rate-limited, please retry soon.")
     raise web.HTTPServiceUnavailable(text="Unable to stream media right now.")
