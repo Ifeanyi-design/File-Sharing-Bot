@@ -8,8 +8,9 @@ from pyrogram import Client
 from pyrogram.enums import ParseMode
 import sys
 from datetime import datetime
+import asyncio
 
-from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNEL, CHANNEL_ID, PORT
+from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNEL, CHANNEL_ID, PORT, STREAM_CONCURRENCY_PER_CLIENT
 
 ascii_art = """
 ░█████╗░░█████╗░██████╗░███████╗██╗░░██╗██████╗░░█████╗░████████╗███████╗
@@ -37,7 +38,8 @@ class Bot(Client):
 
     async def start(self):
         # Initialize Web Server runner early so we can access it if needed
-        self.web_runner = web.AppRunner(await web_server(self))
+        self.web_app = await web_server(self)
+        self.web_runner = web.AppRunner(self.web_app)
         await self.web_runner.setup()
 
         # Start Pyrogram
@@ -60,6 +62,19 @@ class Bot(Client):
         bind_address = "0.0.0.0"
         await web.TCPSite(self.web_runner, bind_address, PORT).start()
         print(f"🌍 Web Server Active on Port {PORT}")
+
+    def set_stream_clients(self, clients):
+        stream_clients = [c for c in clients if c and hasattr(c, "db_channel")]
+        if not stream_clients:
+            stream_clients = [self]
+        self.stream_clients = stream_clients
+        if hasattr(self, "web_app"):
+            self.web_app['stream_clients'] = stream_clients
+            existing = self.web_app.get('client_semaphores', {})
+            semaphores = {}
+            for c in stream_clients:
+                semaphores[c.name] = existing.get(c.name, asyncio.Semaphore(STREAM_CONCURRENCY_PER_CLIENT))
+            self.web_app['client_semaphores'] = semaphores
 
     async def stop(self, *args):
         await super().stop()
