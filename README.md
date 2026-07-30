@@ -142,6 +142,7 @@ python3 main.py
 * `BOT_STATS_TEXT` put your custom text for stats command, use HTML and <a href='https://github.com/codexbotz/File-Sharing-Bot/blob/main/README.md#custom_stats'>fillings</a>
 * `USER_REPLY_TEXT` put your text to show when user sends any message, use HTML
 * `DATABASE_NAME` Your mongo db session name
+* `WORKER_TOKENS` Optional: comma-separated extra bot tokens for worker bots (example: `token1,token2`)
 
 
 ### Fillings
@@ -195,4 +196,3 @@ published by the Free Software Foundation, either version 3 of the License, or
 ##
 
    **Star this Repo if you Liked it ⭐⭐⭐**
-

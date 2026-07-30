@@ -74,6 +74,11 @@
     "AUTO_DEL_SUCCESS_MSG": {
       "description": "The custom message shown to the user once the file is successfully deleted.",
       "value": "Your file has been successfully deleted. Thank you for using our service. ✅"
+    },
+    "WORKER_TOKENS": {
+      "description": "Optional: comma-separated extra bot tokens for worker bots",
+      "value": "",
+      "required": false
     }
   },
   "buildpacks": [
@@ -88,4 +93,3 @@
     }
   }
 }
-
