@@ -253,6 +253,8 @@ async def stream_handler(request):
 
                         await response.write(chunk)
                         remaining -= len(chunk)
+                except FloodWait:
+                    raise
                 except Exception:
                     pass
 
