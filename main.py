@@ -21,6 +21,7 @@ async def start_dummy_server(reason="Unknown"):
 async def start_cluster():
     main_bot = Bot()
     main_bot.name = "Main_Bot"
+    started_stream_clients = []
     
     workers = []
     for i, token in enumerate(WORKER_TOKENS):
@@ -36,8 +37,11 @@ async def start_cluster():
         try:
             await app.start()
             print(f"✅ {app.name} Started Successfully!")
+            started_stream_clients.append(app)
             if app.name == "Main_Bot":
                 main_bot_started = True
+            if hasattr(main_bot, "set_stream_clients"):
+                main_bot.set_stream_clients(started_stream_clients)
             
         except FloodWait as e:
             wait_time = e.value + 10
@@ -50,6 +54,8 @@ async def start_cluster():
             
             await asyncio.sleep(wait_time)
             # We don't retry here to avoid complexity. The dummy server keeps us alive.
+            if hasattr(main_bot, "set_stream_clients") and started_stream_clients:
+                main_bot.set_stream_clients(started_stream_clients)
             
         except Exception as e:
             print(f"❌ CRITICAL ERROR starting {app.name}: {e}")
@@ -57,6 +63,8 @@ async def start_cluster():
             if app.name == "Main_Bot" and not main_bot_started:
                 await start_dummy_server(f"Crash: {e}")
                 main_bot_started = True
+            if hasattr(main_bot, "set_stream_clients") and started_stream_clients:
+                main_bot.set_stream_clients(started_stream_clients)
 
     print("⚡ Cluster Loop Finished. Staying Awake...")
     await idle()

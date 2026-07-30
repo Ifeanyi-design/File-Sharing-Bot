@@ -44,6 +44,12 @@ else:
 JOIN_REQUEST_ENABLE = os.environ.get("JOIN_REQUEST_ENABLED", None)
 
 TG_BOT_WORKERS = int(os.environ.get("TG_BOT_WORKERS", "4"))
+STREAM_CONCURRENCY_PER_CLIENT = int(os.environ.get("STREAM_CONCURRENCY_PER_CLIENT", "3"))
+STREAM_META_CACHE_TTL = int(os.environ.get("STREAM_META_CACHE_TTL", "120"))
+STREAM_META_CACHE_SIZE = int(os.environ.get("STREAM_META_CACHE_SIZE", "2048"))
+STREAM_CHUNK_CACHE_TTL = int(os.environ.get("STREAM_CHUNK_CACHE_TTL", "45"))
+STREAM_CHUNK_CACHE_CHUNKS = int(os.environ.get("STREAM_CHUNK_CACHE_CHUNKS", "256"))
+STREAM_HOT_CACHE_BYTES = int(os.environ.get("STREAM_HOT_CACHE_BYTES", str(16 * 1024 * 1024)))
 
 #start message
 START_PIC = os.environ.get("START_PIC","")
